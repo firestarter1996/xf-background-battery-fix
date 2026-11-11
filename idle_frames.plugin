@@ -1,0 +1,122 @@
+__id__ = "idle_frames"
+__name__ = "Background Battery Fix"
+__description__ = "Stops XF asking for a new screen frame 120 times a second when nothing is moving, in the background too. Cuts the background CPU use that makes Android close XF. Made by [firestarter1996](https://github.com/firestarter1996)."
+__author__ = "firestarter1996"
+__version__ = "1.0.0"
+__min_version__ = "12.5.1"
+
+# XF's Choreographer60FpsContent posts a frame callback on every vsync for the life of the app,
+# even with nothing registered and with XF in the background. On a 120 Hz phone that wakes the
+# main thread 120 times a second all day; Android's background CPU limit then kills XF
+# ("excessive cpu"). The Java part (embedded below) stops that loop when there is nothing to do
+# and restarts it the instant any animation or invalidation is added. The hook runs in Java, no
+# Python on the frame path. Logcat tag XFIdle.
+
+import base64
+import zlib
+
+from java import jclass
+from base_plugin import BasePlugin
+from ui.settings import Header, Text
+
+ENTRY = "com.firestarter.xfidle.IdleFrames"
+
+
+def _log(msg):
+    try:
+        jclass("android.util.Log").i("XFIdle", str(msg))
+    except Exception:
+        pass
+
+
+class IdleFramesPlugin(BasePlugin):
+
+    def create_settings(self):
+        st = "not running"
+        try:
+            if self.core is not None:
+                st = str(self.core.getMethod("stats").invoke(None))
+        except Exception:
+            pass
+        return [Header(text="Background Battery Fix"), Text(text="Status", subtext=st)]
+
+    def on_plugin_load(self):
+        self.core = None
+        try:
+            ctx = jclass("org.telegram.messenger.ApplicationLoader").applicationContext
+            with open(__file__, "r", encoding="utf-8") as fh:
+                text = fh.read()
+            block = text.rsplit("# __DEX_BEGIN__", 1)[1].split("# __DEX_END__", 1)[0]
+            payload = "".join(l.strip()[1:].strip() for l in block.splitlines() if l.strip().startswith("#"))
+            data = zlib.decompress(base64.b64decode(payload))
+            Loader = jclass("dalvik.system.InMemoryDexClassLoader")
+            self.loader = Loader(jclass("java.nio.ByteBuffer").wrap(data), ctx.getClassLoader())
+            self.core = self.loader.loadClass(ENTRY)
+            AU = jclass("org.telegram.messenger.AndroidUtilities")
+            from android_utils import R
+            self._r = R(lambda: _log("install: %s" % self.core.getMethod("install", jclass("java.lang.ClassLoader")).invoke(None, ctx.getClassLoader())))
+            AU.runOnUIThread(self._r)
+        except Exception as e:
+            self.core = None
+            _log("load: %s" % e)
+
+    def on_plugin_unload(self):
+        try:
+            if self.core is not None:
+                self.core.getMethod("uninstall").invoke(None)
+                _log("uninstalled")
+        except Exception as e:
+            _log("unload: %s" % e)
+        self.core = None
+
+# __DEX_BEGIN__
+# eNqdmX9sHMd1x9/s7v3kkrd3pHjkkSKPJ9KmFP4SSVFHkXIiUaJN6yQxEs3IslN7725JrnTcO+4eKdKxHTpRbaeJE8dxnCBo3SKJ
+# C7fpT9QtilZw6yJt3MAwjDZA7bZonbR/GGhQqCmM5o+i6Hdm56ijJLtGj/jce/N75s2bt8O9orUZHRnL0j//8MWvpH56PPZn7/cl
+# Run9s/pr1SfVc4HA1Q6iChFtLo4nSH5eSRF9k/z8XvCWQpSBfFgl2gP5c41oEvLXAkTIopUQ0bVmotch0wbRfjAKDoEsOAruBmfB
+# efBp8DCwwAbYAo+CbXAVPA2eAV8D3wDfA38H3gedcaIZsAKeAb8N3gDvgTRWcBZcAS+CPwB/Bd4BPwMRzLELjIAT4ALwwFPg2+BV
+# 8PfgP0C4BXXBPrAfDIARcAhMgmPgBLgH5MDDYB08B14Evwn+CPwFeBP8A3gX/AyEYcQO0AvuArNgATwElkAZbIDHwZPgGfAC+FXw
+# 6+B3wB+CV8EPwBvgb8E74J/AdaC1EsVBJ+gDWXAMnAaL4EGQB5fBOngMPAmeBS+DvwRvgn8E10EySbQX3AkGgQW+B14Fb4J/Af8O
+# WBtRG0iDj4EjYAbMgfvAg8ACZbABPge+BJ4HvwJeBr8L/hi8Br4Pfgj+BrwDIvA3HcCMwhcxNcKwhCJqB3BdgktTJ9gLukA3SIMe
+# 8v14H+gDd4A7QT/YDw6Aj4EBMAiGwDAYAaPgEDgCjoK7wMfJn0/tE5XyuzF/jkymG4Em9bhM/xbqGDL9CvSE1K9Bb5Lrez3m122V
+# bQ2pvxXz63L9bVknWVeH6+/KftpkPzGpvyfHbZP91HQ+h2apX5f9c1v+XNZJyTpxaVue2SjtS9I23VKfkHrYuKEbdTof97DU23iM
+# kDof94jcK/6ZkjqvX9P5HKalfl2uvafOzvukHoL1w0ImaUzIFC1IeZ+Ui1J+SsoLUj4o5ael/AUhW+mSkJ30uJRPSPk5IdP0tBz3
+# l4TcS1+W6ReEz7bSF8W+xmlc+K4vFZR/TfiHSnkhk/QZKR+DDKBdUMg2moMMynRQpvm8AlIG5bifEDJCx4TspuNCKjQjZDudkPU+
+# KWSC7pdpW0idLgvZQE/Jfr8i2z0vbNxKzxD3LX+8GGa6LNyhk04LHw7QRSGDUjbTw0L2kClkCxWkf5eEDNFzwpf9/pKYxzkhu+hJ
+# 4Y9+fhtGzgnZJGVMSkPKuJQN9CURCxS6Ivw2Qg8J2UGfFzJFV4UPN1BRyDRZQkZpVcQMf7y9+JuV6bNCdpIj5B4qC7/vpCUhw7Qp
+# 9sf/NEnZwNeHQ/N77X46+AHlr7bX/PXGma6VP4ryN1A+meKxhIl48p9NfiypGEnRm4Z1ch/6ryb/TC2MJWjNiMKbojhXrbQmWukU
+# OtjNVHLSKuy1ZjSgPNG8ZuiQa+Lc9Kca1QysVzH4Ez/FHkDdftTVIe9EBNRVxziA2rqawrN/Lc2jYm0tnWJue3fmGIrdfo4NMf/c
+# +nNsQm83j/r1jzxqQIwV3BmzNebvwZoRF5E4RiRL/DJ+T7mEtjFxtphId8T8Z0hWbcbZa6AE25fIkDNykEYUXe1WDXKMdm5JNavC
+# XvEYIzEib5tGW+5feazMSQ/QPOa8ZsTE2AmWxRnKk3pLSRa+mEcfN+dPclt8Mo+ZyZJAHqW12cwrOk5xC2bTLWqzxCFlkvJqI9qn
+# Mb6u9RoZtNU1Xvu8pqt5LSR6GkceH0OjqJbVuiivRW6Tn0B+uJav8ny+5kmsuV97W1FY/1/HWGJPLMDXf7NNbczHf6Zxu6g0jvy9
+# jPsEjyh5xm14CGVRNsmClNLvxYmJ6ym2RQllbaSDenSdpdRHiOv7dOyzti70Xl3XU5qLPTcQx3TN1jRKaZW6tIL0Wl1aRbpal8Zo
+# mleXDiB9RqRnRBqRXftsXTqC9HYtrdpqmFKqQ/t6e7AHXTSt6bqtN2AFp2D1FHYH81N/sb4cbXS0+Sqs2Uy9Ro/ckVrbRsroAXg6
+# cimjBqEFhQUdg58cnfW0sD62eOjkPM2GWMAxhnksDjvGCJeRVHQeO5ShlykazUbbqOdbiY6xP2mh2UhEyUdbaOw3miiPB+4aLl4/
+# ID3kpMcQl94OBll/bypyt2j7TYpGJiMJSkXuqUtHkX4U6X08Hc6GG3f6Obyrn7cDAdb/+xndP61YKVsRp7UTlnDSfYjmkDit3DJ8
+# jxv1NRHlM8xvwSilnBcterBafr5fu6VFF92p+34FLxdn9TqPHozHRQZP/5ZCTyiinHM55t/R6iPIF3YiSIE1Qd8v9BR6qOWbLIYd
+# u4MMheezuvz4Tj6fFY+acRG5FB7LYv5dz0l3itqJuJMehBavu9ttog6/c5iYeSsm/afKihJDHSbvgo/K8gxORsUYFafHQEyqxbDN
+# nbjZI+JmfWzTRGzbI/JVcW9QaTvm30Xrz9qE8CXXOMzPnJJVEuQaWZ6ndCuNlFVwzo1WtO5XG5V+LKz/3/x246iTZ1EqKE2oZVAW
+# 1ksol5CSTxDFf34ouC90YQ6NDHvF/H1IoEZS7Ikq7nHtYq+OiHt4BDqPt8/H/Ht1AW2zuG1PhhFd+hIiJpuworBXegVaHnF8TdzD
+# G7Rk8MD8/9C14rVe5xNDtL3QjzXUnmjdYX8+2+ihSeyDb7H0ApQLjJoG7ZemT328o4vhjllE3gryHvSTLVCph3/14YvdEbN/PP1j
+# 1qcf7Va2Bug4o6nvb9r2U/Lzkv3STxTj/kLXK6dOsUTshWl82S8oVwYUfYrtiXVNKzNsTxM9x/ubhk2bTp2C5zeJu8rn0RdLGPZg
+# V9fFQXv6G4o3QCOouDn9yE86u9HJXhL+lcSfIv53aRLrS0ofT+KJmaj7X4LJO4IiZEaka+U10rI8LvtM4sQx2R+T/z/57RmF0l61
+# XPGOQrliXragsH5i+0k9cNcUhacLJduxq3dRcNqXCs+dPXfs9MmHzpwnNkfqXC5HsbliyZp1zVXLG7pkbpjE7iWWIyU3B+4FOVJz
+# +NJyuYs8+yIlcqZTdMt2cXi9apeGc+XlKTqwk7dhW1eGZ1bKrlVeds3KiuX2it5nzFIpbxYuT1Hnh9Sdor5cobw6vGS7llc13arl
+# Dm8u2Zji8I159h78aNVGp2jf/12NVyqapQ378rDpOOWqWbXLzvBJp1Aqe7azfNqqrpSLU9R1m0pzjmO5MyXTQyd7b1N+3l52zOq6
+# a01R6jbFCytu+QqaTuSK1rBbzm8M1wyzWSl7VnH4wsxD/vD3lMuXe2+o8yZmPkWDH63dfc4KxBTd8ZGqc9N+UD0hjrt2cRkras5x
+# dxkumc7y8PFyuWSZzhTF6zKlYW7JmqbkzVm5slnkm7+nruDkZsGqcDvtHmrOqVrLvK5Rl5krO3DCRF3O2fwlq1DdnXe+6tq8Xvst
+# ecfX7ZKYwK7qW17VWt1d3bWWSuh3eNa2SkW+q7cWnbZW87yr25f5ziTXKc7PMdc1t3K2V/2A7Glqqcuegw+b1TL6VxeO3U3awv3z
+# J4ktkrKIc7rID+ziRQpemOX+TewiKfzQXsShfeDWnWl+4DYG63jgQ+YdNQsFy/N6R0ZGdvSDI6M7+midPjaS3dHHUb/B12dL5rJH
+# qlkskoGvXbGBWm7OOesULIqbS1g1d06r6M+EQmbJtcziFrVJHx3i1hk6XzFdzxKmo6BZqVhOkfS875yLZmndokhB9uxRoIBsl0LF
+# shiSAtZqpYp21tq6WfIgXbfspimwdMI1r1BIiDHc6JbudsvrFbRfyplelYJLiwhjPMl9AsVl9wzvLrTEez2SJnV5Bs/FZbEUbfnc
+# uoMcq0oGvk5YhZLpWkXhTpSoy/HX6VED8uYcBC/eOoJEzQBQxTBxKCIeWLDRwlbF8ii0YnpnrM0qRfnBrzVYEfZLk8bjH77RKYX4
+# NwxCYdup+gYK2s4GKqLIOynsEbaly1HrKjeBmS9Z3kJ5ztkwS3bRrFrUcfv8sZElWCm0Ks2lr3JzLXpbTuGMR4lVYbVd/fStWkMb
+# l92t0lABj4QhOJ/lWlj30Lmaxs8DaQ5fd9gxnfKCDU1z+Fonyu7yUNUqWXiSrA4hrnuWgzgh/MIb2vWQmRiZrXgzZQQSp0on/n/t
+# emseKlZHcYTG6m5fbuJZdatrdq3V8oa1u1LELc1JO8fddcfhRpzZ8dA9t2QJJwp65nn7EbiDZ4o9O1alRs+qHhPny0Z1CiHJYyJp
+# Hq8YFQ8/71N2dYUC0KvYFn51qFhFCkvlKC/BbYKi1RXb86MBhatlP0BScF08RSjkS48i607NeQIbwnNCG3IyvnJ2idgV0vjNhIL8
+# G0chIO4p9Mvs8cdPZD+T4UvCEc0cyRStzcxABs/qil0SD8fB1XLREgX59WUUwaUHCysWTLC+6mWOLOGEWgOZVdsZNCt25sjoxEDG
+# WzEHD6KJmTfN/PjEZP6QlS+OF4uj+fzkwbw5YhUnlsYPjR4+vGSa1njBRK8bluthMDTKDk0MjQ4WrY3MY6SE2bMslVAiykmNNrqU
+# BiQ7WVuzEuVKMKkke5Na8kBSTQ76WWryYLI7GcINjWnb29rrsQDj73AZCyL1UyPErsYT/N1HiqVY9EP+UBp+elu72sGe2Na+28Ge
+# Tr8bx9dbLfj6b679awpf1zpY9PkEi/45qr+VYF/YDr/XwiI/aufaj1C2vVdZ4lfv5KS8K262E3223b8/PtXu5z3b7us87zuQJ1J0
+# y4fV/X/E3yMXU/578vmU/06aS55/IeW//5qXkm6689Z+j1LqfpNS6cbvUhrd+G2Kvweq/T4VpBu/UbG0f1fmv1Opaf9dHH+fhn+A
+# xFz4e3sl7Y/Ff8fS0n5ffO38Us374e/zAml/Tvy9nGr4Y/O1B9P+/Ph7Pb4oJn9L+1+9U8+b
+# __DEX_END__
